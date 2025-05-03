@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+tensorflow==2.19.0
+numpy==2.1.3
+pillow==11.1.0
+python-multipart
+paho-mqtt
+python-dotenv
