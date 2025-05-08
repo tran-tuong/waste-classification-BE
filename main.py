@@ -30,21 +30,52 @@ class BinControlRequest(BaseModel):
 
 @app.get("/healthcheck")
 async def healthcheck():
-    return {"status": "OK", "model_loaded": classifier.model is not None}
+    return {
+        "model_loaded": classifier.model is not None,
+        "mqtt_connected": mqtt_client.connected,
+        "device_status": mqtt_client.esp32_status
+    }
+
+@app.get("/bin_status")
+async def get_bin_status():
+    """Get current status of the waste bin system"""
+    status = mqtt_client.get_bin_status()
+    return {"bin_status": status}
 
 @app.post("/control_bin")
 async def control_bin(request: BinControlRequest):
     try:
+        # Thêm kiểm tra trước khi bin control
+        if not mqtt_client.is_device_online():
+            raise HTTPException(
+                status_code=503,
+                detail="ESP32 device is offline. Cannot control bin."
+            )
         bin_index = request.bin_index
         if bin_index < 0 or bin_index > 3:
-            raise HTTPException(status_code=400, detail="bin_index is 0 to 3")
+            raise HTTPException(status_code=400, detail="bin_index must be 0 to 3")
+            
+        # Check bin status before sending command
+        bin_status = mqtt_client.get_bin_status()
+        if bin_status == "busy":
+            raise HTTPException(
+                status_code=409,  
+                detail="Bin is currently busy. Please wait until it's available."
+            )
+        elif bin_status == "unknown":
+            raise HTTPException(
+                status_code=503, 
+                detail="Bin status is unknown. Please check the connection to the IoT device."
+            )
         
         # Lấy tên loại rác từ bin_index
         bin_name = INDEX_TO_CLASS.get(bin_index, "unknown")
-        
+            
         # Gửi lệnh qua MQTT
         mqtt_client.publish(bin_index)
-        return {"message": f"Opened bin {bin_name}"}
+        return {"message": f"Opened bin {bin_name}", "bin_status": bin_status}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
@@ -54,10 +85,10 @@ async def predict(file: UploadFile = File(...)):
         # Kiểm tra file có phải hình ảnh
         if not file.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail="Uploaded file must be image (.png, .jpg)")
-        
+            
         # Đọc dữ liệu file
         image_data = await file.read()
-        
+            
         # Dự đoán
         predicted_class, probabilities = classifier.predict(image_data)
         return {
@@ -67,27 +98,48 @@ async def predict(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @app.post("/predict_iot")
-async def predict(file: UploadFile = File(...)):
+async def predict_iot(file: UploadFile = File(...)):
     try:
         # Kiểm tra file có phải hình ảnh
         if not file.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail="Uploaded file must be image (.png, .jpg)")
-        
+            
         # Đọc dữ liệu file
         image_data = await file.read()
-        
+            
         # Dự đoán
         predicted_class, probabilities = classifier.predict(image_data)
-        
+            
+        if not mqtt_client.is_device_online():
+            raise HTTPException(
+                status_code=503,
+                detail="ESP32 device is offline. Cannot control bin."
+            ) 
+        # Check bin status before sending command
+        bin_status = mqtt_client.get_bin_status()
+        if bin_status == "busy":
+            raise HTTPException(
+                status_code=409, 
+                detail="Bin is currently busy. Please wait until it's available."
+            )
+        elif bin_status == "unknown":
+            raise HTTPException(
+                status_code=503, 
+                detail="Bin status is unknown. Please check the connection to the IoT device."
+            )
+            
         # Gửi lệnh qua MQTT để mở thùng rác tương ứng
         bin_index = CLASS_TO_INDEX[predicted_class]
         mqtt_client.publish(bin_index)
         bin_name = INDEX_TO_CLASS.get(bin_index, "unknown")
-        
+            
         return {
             "class": predicted_class,
             "bin_index": bin_index,
-            "bin_opened": bin_name
+            "bin_opened": bin_name,
+            "bin_status": "busy"  # Status will change to busy after command
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
