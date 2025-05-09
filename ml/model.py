@@ -5,7 +5,7 @@ from tensorflow.keras.models import load_model
 import io
 
 class WasteClassifier:
-    def __init__(self, model_path='model/model.keras'):
+    def __init__(self, model_path='ml/model/model.keras'):
         self.model = load_model(model_path)
         self.class_names = ['hazardous', 'organic', 'other', 'recycle']
 

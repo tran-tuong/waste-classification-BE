@@ -67,7 +67,7 @@ class MQTTClient:
     def get_bin_status(self):
         if not self.connected:
             return "unknown"
-        if time.time() - self.last_status_update <= 1:
+        if time.time() - self.last_status_update <= 1.5:
             return "busy"
         return self.bin_status
 
