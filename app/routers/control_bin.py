@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from schemas import BinControlRequest
-from dependencies import mqtt_client, INDEX_TO_CLASS
+from app.schemas import BinControlRequest
+from app.dependencies import mqtt_client, INDEX_TO_CLASS
 
 router = APIRouter()
 

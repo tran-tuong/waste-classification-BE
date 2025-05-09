@@ -1,5 +1,5 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
-from dependencies import classifier, mqtt_client, CLASS_TO_INDEX, INDEX_TO_CLASS
+from app.dependencies import classifier, mqtt_client, CLASS_TO_INDEX, INDEX_TO_CLASS
 
 router = APIRouter()
 

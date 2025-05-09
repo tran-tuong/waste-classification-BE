@@ -1,5 +1,5 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
-from dependencies import classifier
+from app.dependencies import classifier
 
 router = APIRouter()
 

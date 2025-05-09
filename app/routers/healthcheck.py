@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from dependencies import classifier, mqtt_client
+from app.dependencies import classifier, mqtt_client
 
 router = APIRouter()
 
