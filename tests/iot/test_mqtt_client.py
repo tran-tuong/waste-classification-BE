@@ -91,7 +91,7 @@ def test_on_connect_failure(mqtt_client):
 def test_on_disconnect_expected(mqtt_client):
     """Test on_disconnect callback with expected disconnection."""
     mqtt_client.connected = True
-    mqtt_client.bin_status = 'available'
+    mqtt_client.bin_status = 'OK'
     mqtt_client.on_disconnect(None, None, 0)
     assert mqtt_client.connected == False
     assert mqtt_client.bin_status == 'unknown'
@@ -107,12 +107,12 @@ def test_on_message_servo_status(mqtt_client):
     """Test on_message callback for servo/status topic."""
     mock_message = MagicMock()
     mock_message.topic = 'test/waste/servo/status'
-    mock_message.payload.decode.return_value = 'available'
+    mock_message.payload.decode.return_value = 'OK'
     
     with patch('time.time', return_value=1000):
         mqtt_client.on_message(None, None, mock_message)
     
-    assert mqtt_client.bin_status == 'available'
+    assert mqtt_client.bin_status == 'OK'
     assert mqtt_client.last_status_update == 1000
 
 def test_on_message_status(mqtt_client):
@@ -130,11 +130,11 @@ def test_on_message_invalid_topic(mqtt_client):
     mock_message.topic = 'test/waste/invalid'
     mock_message.payload.decode.return_value = 'something'
     
-    mqtt_client.bin_status = 'available'
+    mqtt_client.bin_status = 'OK'
     mqtt_client.esp32_status = 'online'
     mqtt_client.on_message(None, None, mock_message)
     
-    assert mqtt_client.bin_status == 'available'  # Should not change
+    assert mqtt_client.bin_status == 'OK'  # Should not change
     assert mqtt_client.esp32_status == 'online'  # Should not change
 
 def test_is_device_online(mqtt_client):
@@ -157,17 +157,17 @@ def test_get_bin_status_busy(mqtt_client):
     mqtt_client.last_status_update = time.time()
     assert mqtt_client.get_bin_status() == 'busy'
 
-def test_get_bin_status_available(mqtt_client):
+def test_get_bin_status_OK(mqtt_client):
     """Test get_bin_status when update is old and bin is available."""
     mqtt_client.connected = True
     mqtt_client.last_status_update = time.time() - 2
-    mqtt_client.bin_status = 'available'
-    assert mqtt_client.get_bin_status() == 'available'
+    mqtt_client.bin_status = 'OK'
+    assert mqtt_client.get_bin_status() == 'OK'
 
 def test_get_bin_status_edge_time(mqtt_client):
     """Test get_bin_status at the edge of the 1.5-second threshold."""
     mqtt_client.connected = True
-    mqtt_client.bin_status = 'available'
+    mqtt_client.bin_status = 'OK'
     
     # Just within 1.5 seconds
     mqtt_client.last_status_update = time.time() - 1.4
@@ -175,7 +175,7 @@ def test_get_bin_status_edge_time(mqtt_client):
     
     # Just beyond 1.5 seconds
     mqtt_client.last_status_update = time.time() - 1.6
-    assert mqtt_client.get_bin_status() == 'available'
+    assert mqtt_client.get_bin_status() == 'OK'
 
 def test_publish_success(mqtt_client):
     """Test publish method with successful publication."""

@@ -10,15 +10,16 @@ def custom_openapi(app):
         summary="A smart API integrating Machine Learning for waste image classification and IoT (ESP32 + MQTT) to control trash bins.",
         description="""
 ### 🚀 Features
-- ✅ **Health Check**: Verify model and MQTT status
-- 🗑️ **Bin Control**: Open/close bins via MQTT
-- 🧠 **Prediction**: Predict waste type from image and auto-open bins
+- **Health Check**: Verify model and MQTT status
+- **Bin Control**: Open/close bins via MQTT
+- **Prediction**: Predict waste type from image and auto-open bins
 
 ### ⚠️ Error Codes
-- `400`: Invalid input (e.g., image type, bin index)
-- `409`: Bin is busy
-- `503`: IoT device unavailable
-- `500`: Internal server error
+- 400: Invalid input (e.g., image type, bin index)
+- 409: Bin is busy
+- 422: Missing required fields
+- 500: Internal server error (e.g., model or MQTT failure)
+- 503: IoT device unavailable or unknown status
 """,
         routes=app.routes,
     )
@@ -31,56 +32,130 @@ def custom_openapi(app):
 
     for path, methods in openapi_schema["paths"].items():
         for method, operation in methods.items():
-            if path == "/healthcheck":
+            if path == "/healthcheck" and method == "get":
                 operation.update({
                     "tags": ["Health"],
                     "summary": "Check system health",
-                    "description": "Returns the ML model load status, MQTT connection, and device state.",
+                    "description": "Returns the ML model load status, MQTT connection, and ESP32 device state.",
                     "responses": {
                         "200": {
-                            "description": "OK",
+                            "description": "System health status",
                             "content": {
                                 "application/json": {
-                                    "example": {
-                                        "model_loaded": True,
-                                        "mqtt_connected": True,
-                                        "device_status": "online"
+                                    "examples": {
+                                        "all_systems_ok": {
+                                            "summary": "All systems operational",
+                                            "value": {
+                                                "model_loaded": True,
+                                                "mqtt_connected": True,
+                                                "device_status": "online"
+                                            }
+                                        },
+                                        "model_not_loaded": {
+                                            "summary": "Model not loaded",
+                                            "value": {
+                                                "model_loaded": False,
+                                                "mqtt_connected": True,
+                                                "device_status": "online"
+                                            }
+                                        },
+                                        "mqtt_disconnected": {
+                                            "summary": "MQTT disconnected",
+                                            "value": {
+                                                "model_loaded": True,
+                                                "mqtt_connected": False,
+                                                "device_status": "online"
+                                            }
+                                        },
+                                        "device_offline": {
+                                            "summary": "Device offline",
+                                            "value": {
+                                                "model_loaded": True,
+                                                "mqtt_connected": True,
+                                                "device_status": "offline"
+                                            }
+                                        },
+                                        "all_systems_down": {
+                                            "summary": "All systems down",
+                                            "value": {
+                                                "model_loaded": False,
+                                                "mqtt_connected": False,
+                                                "device_status": "unknown"
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 })
-            elif path == "/bin_status":
+            elif path == "/bin_status" and method == "get":
                 operation.update({
                     "tags": ["Bin Management"],
                     "summary": "Get bin status",
-                    "description": "Returns current status of bin: OK, busy, or unknown.",
+                    "description": "Returns current bin status: OK, busy, or unknown.",
                     "responses": {
                         "200": {
-                            "description": "OK",
+                            "description": "Bin status retrieved",
                             "content": {
                                 "application/json": {
-                                    "example": {
-                                        "bin_status": "OK"
+                                    "examples": {
+                                        "available": {
+                                            "summary": "Bin available",
+                                            "value": {"bin_status": "OK"}
+                                        },
+                                        "busy": {
+                                            "summary": "Bin busy",
+                                            "value": {"bin_status": "busy"}
+                                        },
+                                        "unknown": {
+                                            "summary": "Bin status unknown",
+                                            "value": {"bin_status": "unknown"}
+                                        }
                                     }
+                                }
+                            }
+                        },
+                        "500": {
+                            "description": "Internal server error",
+                            "content": {
+                                "application/json": {
+                                    "example": {"detail": "Error: MQTT Error"}
                                 }
                             }
                         }
                     }
                 })
-            elif path == "/control_bin":
+            elif path == "/control_bin" and method == "post":
                 operation.update({
                     "tags": ["Bin Management"],
                     "summary": "Control specific bin",
                     "description": "Opens bin by index (0: organic, 1: recycle, 2: hazardous, 3: other).",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "bin_index": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 3
+                                        }
+                                    },
+                                    "required": ["bin_index"]
+                                }
+                            }
+                        }
+                    },
                     "responses": {
                         "200": {
                             "description": "Bin opened successfully",
                             "content": {
                                 "application/json": {
                                     "example": {
-                                        "message": "Opened bin organic",
+                                        "message": "Opened bin recycle",
                                         "bin_status": "OK"
                                     }
                                 }
@@ -106,23 +181,57 @@ def custom_openapi(app):
                             "description": "Device offline or unknown status",
                             "content": {
                                 "application/json": {
-                                    "example": {"detail": "ESP32 device is offline. Cannot control bin."}
+                                    "examples": {
+                                        "device_offline": {
+                                            "summary": "Device offline",
+                                            "value": {"detail": "ESP32 device is offline. Cannot control bin."}
+                                        },
+                                        "unknown_status": {
+                                            "summary": "Unknown bin status",
+                                            "value": {"detail": "Bin status is unknown. Cannot control bin."}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "500": {
+                            "description": "Internal server error",
+                            "content": {
+                                "application/json": {
+                                    "example": {"detail": "Error: Failed to publish"}
                                 }
                             }
                         }
                     }
                 })
-            elif path == "/predict":
+            elif path == "/predict" and method == "post":
                 operation.update({
                     "tags": ["Prediction"],
                     "summary": "Classify waste image",
                     "description": "Upload a .jpg or .png waste image to receive predicted class.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "file": {
+                                            "type": "string",
+                                            "format": "binary"
+                                        }
+                                    },
+                                    "required": ["file"]
+                                }
+                            }
+                        }
+                    },
                     "responses": {
                         "200": {
                             "description": "Prediction success",
                             "content": {
                                 "application/json": {
-                                    "example": {"class": "organic"}
+                                    "example": {"class": "recycle"}
                                 }
                             }
                         },
@@ -134,30 +243,55 @@ def custom_openapi(app):
                                 }
                             }
                         },
+                        "422": {
+                            "description": "Missing file",
+                            "content": {
+                                "application/json": {
+                                    "example": {"detail": [{"loc": ["body", "file"], "msg": "Field required", "type": "missing"}]}
+                                }
+                            }
+                        },
                         "500": {
                             "description": "Internal server error",
                             "content": {
                                 "application/json": {
-                                    "example": {"detail": "Error: <error message>"}
+                                    "example": {"detail": "Error: Model prediction error"}
                                 }
                             }
                         }
                     }
                 })
-            elif path == "/predict_iot":
+            elif path == "/predict_iot" and method == "post":
                 operation.update({
                     "tags": ["Prediction"],
                     "summary": "Predict & auto-open bin",
                     "description": "Upload image → predict → open bin via MQTT (if device is ready).",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "file": {
+                                            "type": "string",
+                                            "format": "binary"
+                                        }
+                                    },
+                                    "required": ["file"]
+                                }
+                            }
+                        }
+                    },
                     "responses": {
                         "200": {
                             "description": "Prediction and bin control successful",
                             "content": {
                                 "application/json": {
                                     "example": {
-                                        "class": "organic",
-                                        "bin_index": 0,
-                                        "bin_opened": "organic",
+                                        "class": "recycle",
+                                        "bin_index": 1,
+                                        "bin_opened": "recycle",
                                         "bin_status": "busy"
                                     }
                                 }
@@ -183,7 +317,16 @@ def custom_openapi(app):
                             "description": "Device offline or unknown status",
                             "content": {
                                 "application/json": {
-                                    "example": {"detail": "ESP32 device is offline. Cannot control bin."}
+                                    "examples": {
+                                        "device_offline": {
+                                            "summary": "Device offline",
+                                            "value": {"detail": "ESP32 device is offline. Cannot control bin."}
+                                        },
+                                        "unknown_status": {
+                                            "summary": "Unknown bin status",
+                                            "value": {"detail": "Bin status is unknown. Cannot control bin."}
+                                        }
+                                    }
                                 }
                             }
                         },
@@ -191,7 +334,16 @@ def custom_openapi(app):
                             "description": "Internal server error",
                             "content": {
                                 "application/json": {
-                                    "example": {"detail": "Error: <error message>"}
+                                    "examples": {
+                                        "model_error": {
+                                            "summary": "Model prediction error",
+                                            "value": {"detail": "Error: Model prediction error"}
+                                        },
+                                        "mqtt_error": {
+                                            "summary": "MQTT publish error",
+                                            "value": {"detail": "Error: Failed to publish"}
+                                        }
+                                    }
                                 }
                             }
                         }
