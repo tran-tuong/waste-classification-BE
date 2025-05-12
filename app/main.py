@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import healthcheck, bin_status, control_bin, predict, predict_iot
-from app.openapi import custom_openapi
+from config.swagger import custom_openapi
 
 app = FastAPI(
     title="Waste Classification API",
