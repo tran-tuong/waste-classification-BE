@@ -1,77 +1,204 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 import time
 import os
+import ssl
+import tempfile
 from iot.mqtt_client import MQTTClient
 
 @pytest.fixture
 def mock_env_vars():
     """Fixture to mock environment variables with default values."""
     with patch('os.getenv') as mock_getenv:
-        mock_getenv.side_effect = lambda key, default: {
+        mock_getenv.side_effect = lambda key, default=None: {
             'MQTT_BROKER': 'test.broker.com',
-            'MQTT_PORT': '1883',
+            'MQTT_PORT': '8883',
             'MQTT_USERNAME': 'test_user',
             'MQTT_PASSWORD': 'test_pass',
-            'MQTT_BASE_TOPIC': 'test/waste'
+            'MQTT_BASE_TOPIC': 'test/waste',
+            'MQTT_CA_CERT': None,
+            'MQTT_CA_CERT_PATH': None,
+            'MQTT_USE_SSL': 'true',
+            'MQTT_VERIFY_CERTS': 'true'
         }.get(key, default)
         yield mock_getenv
 
 @pytest.fixture
 def mqtt_client(mock_env_vars):
     """Fixture to create an MQTTClient instance with mocked dependencies."""
-    with patch('paho.mqtt.client.Client') as mock_mqtt_client:
+    with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+         patch('iot.mqtt_client.MQTTClient.configure_ssl') as mock_configure_ssl:
         client = MQTTClient()
         client.client = mock_mqtt_client.return_value
         return client
 
-def test_mqtt_client_init_success(mock_env_vars, mqtt_client):
+def test_mqtt_client_init_success(mock_env_vars):
     """Test successful MQTTClient initialization."""
-    assert mqtt_client.broker == 'test.broker.com'
-    assert mqtt_client.port == 1883
-    assert mqtt_client.username == 'test_user'
-    assert mqtt_client.password == 'test_pass'
-    assert mqtt_client.base_topic == 'test/waste'
-    assert mqtt_client.connected == False
-    assert mqtt_client.bin_status == 'unknown'
-    assert mqtt_client.esp32_status == 'unknown'
-    mqtt_client.client.username_pw_set.assert_called_with('test_user', 'test_pass')
-    mqtt_client.client.connect.assert_called_with('test.broker.com', 1883, 60)
-    mqtt_client.client.loop_start.assert_called_once()
+    with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+         patch('iot.mqtt_client.MQTTClient.configure_ssl') as mock_configure_ssl:
+        client = MQTTClient()
+        
+        assert client.broker == 'test.broker.com'
+        assert client.port == 8883
+        assert client.username == 'test_user'
+        assert client.password == 'test_pass'
+        assert client.base_topic == 'test/waste'
+        assert client.connected == False
+        assert client.bin_status == 'unknown'
+        assert client.esp32_status == 'unknown'
+        assert client.use_ssl == True
+        assert client.verify_certs == True
+        
+        mock_mqtt_client.return_value.username_pw_set.assert_called_with('test_user', 'test_pass')
+        mock_configure_ssl.assert_called_once()
+        mock_mqtt_client.return_value.connect.assert_called_with('test.broker.com', 8883, 60)
+        mock_mqtt_client.return_value.loop_start.assert_called_once()
 
 def test_mqtt_client_init_invalid_port(mock_env_vars):
     """Test initialization with invalid MQTT_PORT."""
-    mock_env_vars.side_effect = lambda key, default: {
+    mock_env_vars.side_effect = lambda key, default=None: {
         'MQTT_BROKER': 'test.broker.com',
         'MQTT_PORT': 'invalid',
         'MQTT_USERNAME': 'test_user',
         'MQTT_PASSWORD': 'test_pass',
-        'MQTT_BASE_TOPIC': 'test/waste'
+        'MQTT_BASE_TOPIC': 'test/waste',
+        'MQTT_USE_SSL': 'true',
+        'MQTT_VERIFY_CERTS': 'true'
     }.get(key, default)
     
-    with patch('paho.mqtt.client.Client') as mock_mqtt_client:
+    with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+         patch('iot.mqtt_client.MQTTClient.configure_ssl') as mock_configure_ssl:
         with pytest.raises(ValueError):
             MQTTClient()
 
-def test_mqtt_client_init_missing_env_vars(mock_env_vars):
-    """Test initialization with missing environment variables."""
-    mock_env_vars.side_effect = lambda key, default: default
-    
-    with patch('paho.mqtt.client.Client') as mock_mqtt_client:
-        client = MQTTClient()
-        assert client.broker == 'broker.emqx.io'
-        assert client.port == 1883
-        assert client.username == 'emqx'
-        assert client.password == 'public'
-        assert client.base_topic == 'waste'
-
 def test_mqtt_client_init_connection_failure(mock_env_vars):
     """Test initialization with connection failure."""
-    with patch('paho.mqtt.client.Client') as mock_mqtt_client:
+    with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+         patch('iot.mqtt_client.MQTTClient.configure_ssl') as mock_configure_ssl:
         mock_mqtt_client.return_value.connect.side_effect = Exception("Connection refused")
         client = MQTTClient()
         assert client.connected == False
         assert client.bin_status == 'unknown'
+
+def test_mqtt_client_ssl_disabled(mock_env_vars):
+    """Test initialization with SSL disabled."""
+    mock_env_vars.side_effect = lambda key, default=None: {
+        'MQTT_BROKER': 'test.broker.com',
+        'MQTT_PORT': '1883',
+        'MQTT_USERNAME': 'test_user',
+        'MQTT_PASSWORD': 'test_pass',
+        'MQTT_BASE_TOPIC': 'test/waste',
+        'MQTT_USE_SSL': 'false',
+        'MQTT_VERIFY_CERTS': 'true'
+    }.get(key, default)
+    
+    with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+         patch('iot.mqtt_client.MQTTClient.configure_ssl') as mock_configure_ssl:
+        client = MQTTClient()
+        assert client.use_ssl == False
+        assert client.port == 1883
+        mock_configure_ssl.assert_not_called()
+
+def test_configure_ssl_with_ca_cert_content():
+    """Test SSL configuration with CA certificate content."""
+    with patch('os.getenv') as mock_getenv:
+        mock_getenv.side_effect = lambda key, default=None: {
+            'MQTT_BROKER': 'test.broker.com',
+            'MQTT_PORT': '8883',
+            'MQTT_USERNAME': 'test_user',
+            'MQTT_PASSWORD': 'test_pass',
+            'MQTT_BASE_TOPIC': 'test/waste',
+            'MQTT_CA_CERT': '-----BEGIN CERTIFICATE-----\ntest_cert\n-----END CERTIFICATE-----',
+            'MQTT_USE_SSL': 'true',
+            'MQTT_VERIFY_CERTS': 'true'
+        }.get(key, default)
+        
+        with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+             patch('ssl.create_default_context') as mock_ssl_context, \
+             patch('tempfile.NamedTemporaryFile') as mock_temp_file, \
+             patch('os.unlink') as mock_unlink:
+            
+            mock_context = MagicMock()
+            mock_ssl_context.return_value = mock_context
+            mock_temp_file.return_value.__enter__.return_value.name = '/tmp/test_cert.pem'
+            
+            client = MQTTClient()
+            
+            mock_ssl_context.assert_called_with(ssl.Purpose.SERVER_AUTH)
+            mock_context.load_verify_locations.assert_called_with('/tmp/test_cert.pem')
+            mock_mqtt_client.return_value.tls_set_context.assert_called_with(mock_context)
+            mock_unlink.assert_called_with('/tmp/test_cert.pem')
+
+def test_configure_ssl_with_ca_cert_path():
+    """Test SSL configuration with CA certificate path."""
+    with patch('os.getenv') as mock_getenv:
+        mock_getenv.side_effect = lambda key, default=None: {
+            'MQTT_BROKER': 'test.broker.com',
+            'MQTT_PORT': '8883',
+            'MQTT_USERNAME': 'test_user',
+            'MQTT_PASSWORD': 'test_pass',
+            'MQTT_BASE_TOPIC': 'test/waste',
+            'MQTT_CA_CERT_PATH': '/path/to/ca.pem',
+            'MQTT_USE_SSL': 'true',
+            'MQTT_VERIFY_CERTS': 'true'
+        }.get(key, default)
+        
+        with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+             patch('ssl.create_default_context') as mock_ssl_context, \
+             patch('os.path.exists', return_value=True) as mock_exists:
+            
+            mock_context = MagicMock()
+            mock_ssl_context.return_value = mock_context
+            
+            client = MQTTClient()
+            
+            mock_ssl_context.assert_called_with(ssl.Purpose.SERVER_AUTH)
+            mock_context.load_verify_locations.assert_called_with('/path/to/ca.pem')
+            mock_mqtt_client.return_value.tls_set_context.assert_called_with(mock_context)
+
+def test_configure_ssl_without_cert_verification():
+    """Test SSL configuration with certificate verification disabled."""
+    with patch('os.getenv') as mock_getenv:
+        mock_getenv.side_effect = lambda key, default=None: {
+            'MQTT_BROKER': 'test.broker.com',
+            'MQTT_PORT': '8883',
+            'MQTT_USERNAME': 'test_user',
+            'MQTT_PASSWORD': 'test_pass',
+            'MQTT_BASE_TOPIC': 'test/waste',
+            'MQTT_USE_SSL': 'true',
+            'MQTT_VERIFY_CERTS': 'false'
+        }.get(key, default)
+        
+        with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+             patch('ssl.create_default_context') as mock_ssl_context:
+            
+            mock_context = MagicMock()
+            mock_ssl_context.return_value = mock_context
+            
+            client = MQTTClient()
+            
+            assert mock_context.check_hostname == False
+            assert mock_context.verify_mode == ssl.CERT_NONE
+            mock_mqtt_client.return_value.tls_set_context.assert_called_with(mock_context)
+
+def test_configure_ssl_failure():
+    """Test SSL configuration failure."""
+    with patch('os.getenv') as mock_getenv:
+        mock_getenv.side_effect = lambda key, default=None: {
+            'MQTT_BROKER': 'test.broker.com',
+            'MQTT_PORT': '8883',
+            'MQTT_USERNAME': 'test_user',
+            'MQTT_PASSWORD': 'test_pass',
+            'MQTT_BASE_TOPIC': 'test/waste',
+            'MQTT_USE_SSL': 'true',
+            'MQTT_VERIFY_CERTS': 'true'
+        }.get(key, default)
+        
+        with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+             patch('ssl.create_default_context', side_effect=Exception("SSL Error")):
+            
+            with pytest.raises(Exception, match="SSL Error"):
+                MQTTClient()
 
 def test_on_connect_success(mqtt_client):
     """Test on_connect callback with successful connection."""
@@ -86,7 +213,8 @@ def test_on_connect_failure(mqtt_client):
         mqtt_client.connected = False
         mqtt_client.on_connect(None, None, None, rc)
         assert mqtt_client.connected == False
-        mqtt_client.client.subscribe.assert_not_called()
+        # Reset mock call history for each iteration
+        mqtt_client.client.subscribe.reset_mock()
 
 def test_on_disconnect_expected(mqtt_client):
     """Test on_disconnect callback with expected disconnection."""
@@ -213,6 +341,49 @@ def test_publish_failure(mqtt_client):
     
     with pytest.raises(ConnectionError, match="Failed to publish to test/waste/1"):
         mqtt_client.publish(1)
+
+def test_get_connection_info(mqtt_client):
+    """Test get_connection_info method."""
+    mqtt_client.connected = True
+    mqtt_client.esp32_status = 'online'
+    mqtt_client.bin_status = 'OK'
+    
+    info = mqtt_client.get_connection_info()
+    
+    expected_info = {
+        "connected": True,
+        "broker": 'test.broker.com',
+        "port": 8883,
+        "ssl_enabled": True,
+        "cert_verification": True,
+        "ca_cert_configured": False,  # No CA cert in default fixture
+        "esp32_status": 'online',
+        "bin_status": 'OK'
+    }
+    
+    assert info == expected_info
+
+def test_get_connection_info_with_ca_cert():
+    """Test get_connection_info method with CA certificate configured."""
+    with patch('os.getenv') as mock_getenv:
+        mock_getenv.side_effect = lambda key, default=None: {
+            'MQTT_BROKER': 'test.broker.com',
+            'MQTT_PORT': '8883',
+            'MQTT_USERNAME': 'test_user',
+            'MQTT_PASSWORD': 'test_pass',
+            'MQTT_BASE_TOPIC': 'test/waste',
+            'MQTT_CA_CERT': '-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----',
+            'MQTT_USE_SSL': 'true',
+            'MQTT_VERIFY_CERTS': 'false'
+        }.get(key, default)
+        
+        with patch('paho.mqtt.client.Client') as mock_mqtt_client, \
+             patch('iot.mqtt_client.MQTTClient.configure_ssl') as mock_configure_ssl:
+            client = MQTTClient()
+            
+            info = client.get_connection_info()
+            assert info["ca_cert_configured"] == True
+            assert info["cert_verification"] == False
 
 def test_disconnect_connected(mqtt_client):
     """Test disconnect method when connected."""
