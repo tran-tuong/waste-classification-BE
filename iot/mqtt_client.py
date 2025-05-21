@@ -16,8 +16,7 @@ class MQTTClient:
         self.base_topic = os.getenv("MQTT_BASE_TOPIC")
         
         # SSL/TLS Configuration
-        self.ca_cert_content = os.getenv("MQTT_CA_CERT")  # CA cert content từ .env
-        self.ca_cert_path = os.getenv("MQTT_CA_CERT_PATH")  # Hoặc đường dẫn file
+        self.ca_cert_path = os.getenv("MQTT_CA_CERT_PATH") 
         
         # SSL/TLS Options
         self.use_ssl = os.getenv("MQTT_USE_SSL", "true").lower() == "true"
@@ -55,22 +54,8 @@ class MQTTClient:
         try:
             # Create SSL context
             context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            
-            # Load CA certificate - từ content trong .env hoặc từ file
-            if self.ca_cert_content:
-                # Tạo file tạm thời từ content trong .env
-                import tempfile
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False) as temp_file:
-                    temp_file.write(self.ca_cert_content)
-                    temp_ca_path = temp_file.name
                 
-                context.load_verify_locations(temp_ca_path)
-                print("[INFO] Loaded CA certificate from environment variable")
-                
-                # Xóa file tạm thời
-                os.unlink(temp_ca_path)
-                
-            elif self.ca_cert_path and os.path.exists(self.ca_cert_path):
+            if self.ca_cert_path and os.path.exists(self.ca_cert_path):
                 context.load_verify_locations(self.ca_cert_path)
                 print(f"[INFO] Loaded CA certificate from {self.ca_cert_path}")
             else:
@@ -145,7 +130,7 @@ class MQTTClient:
             "port": self.port,
             "ssl_enabled": self.use_ssl,
             "cert_verification": self.verify_certs,
-            "ca_cert_configured": bool(self.ca_cert_content or (self.ca_cert_path and os.path.exists(self.ca_cert_path))),
+            "ca_cert_configured": bool(self.ca_cert_path and os.path.exists(self.ca_cert_path)),
             "esp32_status": self.esp32_status,
             "bin_status": self.bin_status
         }
