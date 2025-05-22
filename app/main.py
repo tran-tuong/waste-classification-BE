@@ -2,8 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import healthcheck, bin_status, control_bin, predict, predict_iot
 from config.swagger import custom_openapi
+from dotenv import load_dotenv
 import uvicorn
 import os
+
+load_dotenv()
 
 app = FastAPI(
     title="Waste Classification API",
@@ -13,8 +16,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Update for production later
-    # allow_origins=["https://waste-classification-blush.vercel.app"]
+    allow_origins=os.getenv("FE"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
